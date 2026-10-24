@@ -1,0 +1,51 @@
+"""End-to-end test for Engine. Walks through every feature in headless Chrome.
+Run: python3 -m http.server 8000   (in one terminal)
+     python3 tests/e2e_test.py     (in another)
+Needs: pip install playwright && playwright install chromium"""
+from playwright.sync_api import sync_playwright
+import sys,base64,json
+URL=sys.argv[1] if len(sys.argv)>1 else "http://localhost:8000/"
+errs=[]
+with sync_playwright() as p:
+    b=p.chromium.launch(args=["--use-fake-device-for-media-stream","--use-fake-ui-for-media-stream"])
+    ctx=b.new_context(viewport={"width":420,"height":900},permissions=["camera"])
+    pg=ctx.new_page()
+    pg.on("pageerror",lambda e:errs.append("PAGEERROR "+str(e)))
+    pg.on("console",lambda m:m.type=="error" and errs.append("CONSOLE "+m.text))
+    pg.goto(URL); pg.wait_for_timeout(500)
+    pg.click("#startBtn"); pg.click('#sexSeg button[data-v="m"]'); pg.fill("#age","30")
+    assert pg.is_visible("#camRhr"), "camera button missing"
+    pg.fill("#f_waist","86"); pg.fill("#f_rhr","64"); pg.click("#calcBtn")
+    pg.wait_for_selector("#reveal.on"); pg.wait_for_timeout(4200)
+    print("reveal:",pg.inner_text("#rvNum"),"|",pg.inner_text("#rvAge"))
+    pg.screenshot(path="tests/out_s_reveal.png")
+    pg.click("#rvGo"); pg.wait_for_timeout(300); pg.click("#next1")
+    for q in pg.query_selector_all("#questions .q"): q.query_selector(".chip:nth-child(2)").click()
+    print("efficiency:",pg.inner_text("#effNum"))
+    pg.click("#next2"); print("pace weeks:",pg.inner_text("#paces").replace("\n"," ")[:90])
+    pg.click("#next3"); pg.click('#sportChips .chip[data-v="hyrox"]'); pg.click('#daysChips .chip[data-v="5"]'); pg.click("#buildBtn")
+    pg.wait_for_selector("#dash:not(.hidden)")
+    pg.click('.tabs button[data-tab="plan"]')
+    t=pg.inner_text('[data-panel="plan"]'); print("plan undefined?", "undefined" in t, "| hyrox stations?", "stations" in t)
+    pg.click('#ci .chip[data-ci="sessions"][data-v="all"]'); pg.click('#ci .chip[data-ci="hard"][data-v="easy"]'); pg.click('#ci .chip[data-ci="sleep"][data-v="good"]'); pg.click("#ciB")
+    pg.wait_for_timeout(300); print("check-in banner:", "Stepped up" in pg.inner_text('[data-panel="plan"]'))
+    pg.click('.tabs button[data-tab="timer"]'); pg.click("#tStart"); pg.wait_for_timeout(600); pg.click("#tSkip"); print("timer phase:",pg.inner_text("#tPh")); pg.click("#tStart")
+    pg.click('.tabs button[data-tab="progress"]'); pg.fill("#lgV","56"); pg.click("#lgB")
+    pg.wait_for_selector("#studio:not(.hidden)",timeout=4000); pg.wait_for_timeout(800)
+    print("studio tabs:",pg.inner_text("#stTabs").replace("\n"," | "))
+    src=pg.get_attribute("#stImg","src"); open("tests/out_card_ba.png","wb").write(base64.b64decode(src.split(",")[1]))
+    pg.click('#stTabs .chip[data-st="result"]'); pg.wait_for_timeout(800); src=pg.get_attribute("#stImg","src"); open("tests/out_card_result.png","wb").write(base64.b64decode(src.split(",")[1]))
+    pg.click("#stClose")
+    pg.click('.tabs button[data-tab="pulse"]'); pg.click("#puOpen"); pg.click("#puStart"); pg.wait_for_timeout(2500)
+    print("pulse status:",pg.inner_text("#puStatus")); pg.click("#puClose")
+    pg.click('.tabs button[data-tab="engine"]'); pg.fill("#chN","Office engine challenge"); pg.fill("#chMe","Mukii"); pg.click("#chCreate"); pg.wait_for_timeout(300)
+    print("challenge:",pg.inner_text('[data-panel="engine"] .glass:last-child').split("\n")[:3])
+    pg.evaluate("S.challenge.s='2026-10-12';save();renderEngine()"); pg.click("#chPost"); pg.wait_for_timeout(900)
+    src=pg.get_attribute("#stImg","src"); open("tests/out_card_ch.png","wb").write(base64.b64decode(src.split(",")[1])); pg.click("#stClose")
+    # invite link in a fresh browser profile
+    c=base64.urlsafe_b64encode(json.dumps({"n":"Office engine challenge","h":"Mukii","s":"2026-10-26"}).encode()).decode().rstrip("=")
+    pg2=b.new_context(viewport={"width":420,"height":900}).new_page(); pg2.on("pageerror",lambda e:errs.append("PAGEERROR2 "+str(e)))
+    pg2.goto(URL+"?c="+c); pg2.wait_for_timeout(500); print("invite:",pg2.inner_text("h2").split("\n")[0][:60])
+    pg2.fill("#jMe","Sam"); pg2.click("#jGo"); pg2.wait_for_timeout(300); print("after join, step1 visible:",pg2.is_visible('.step[data-step="1"]'))
+    b.close()
+print("ERRORS:",errs if errs else "none")
